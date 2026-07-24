@@ -9,6 +9,9 @@ interface SpeechRecognitionResultLike {
 interface SpeechRecognitionEventLike extends Event {
   results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>;
 }
+interface SpeechRecognitionErrorEventLike extends Event {
+  error: string;
+}
 interface SpeechRecognitionLike extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
@@ -17,13 +20,22 @@ interface SpeechRecognitionLike extends EventTarget {
   stop(): void;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onend: (() => void) | null;
-  onerror: ((event: Event) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEventLike) => void) | null;
 }
+
+const ERROR_MESSAGES: Record<string, string> = {
+  "not-allowed": "Microphone access was blocked. Check your browser's site permissions and allow the microphone.",
+  "no-speech": "Didn't catch that — no speech detected. Try again.",
+  "audio-capture": "No microphone was found. Check that one is connected and not in use by another app.",
+  network: "A network error interrupted speech recognition. Try again.",
+  aborted: "",
+};
 
 export function useSpeechRecognition() {
   const [isSupported, setIsSupported] = useState(false);
   const [listening, setListening] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 
   useEffect(() => {
@@ -66,12 +78,22 @@ export function useSpeechRecognition() {
       if (final) onFinalResult(final.trim());
     };
     recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+    recognition.onerror = (event) => {
+      setListening(false);
+      const message = ERROR_MESSAGES[event.error] ?? `Speech recognition error: ${event.error}`;
+      if (message) setError(message);
+    };
 
     recognitionRef.current = recognition;
     setTranscript("");
+    setError(null);
     setListening(true);
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setError("Couldn't start the microphone. Try again in a moment.");
+    }
   }, []);
 
   const stop = useCallback(() => {
@@ -79,7 +101,7 @@ export function useSpeechRecognition() {
     setListening(false);
   }, []);
 
-  return { isSupported, listening, transcript, start, stop };
+  return { isSupported, listening, transcript, error, start, stop };
 }
 
 export function speak(text: string) {

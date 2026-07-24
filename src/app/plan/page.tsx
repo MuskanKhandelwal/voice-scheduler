@@ -12,7 +12,7 @@ interface ChatBubble {
 
 export default function PlanPage() {
   const sessionId = useMemo(() => crypto.randomUUID(), []);
-  const { isSupported, listening, transcript, start, stop } = useSpeechRecognition();
+  const { isSupported, listening, transcript, error: micError, start, stop } = useSpeechRecognition();
   const [messages, setMessages] = useState<ChatBubble[]>([
     { role: "assistant", content: "Tell me what's on your plate today." },
   ]);
@@ -109,7 +109,7 @@ export default function PlanPage() {
         <div ref={bottomRef} />
       </div>
 
-      <div className="mb-8 flex items-center gap-3">
+      <div className="mb-3 flex items-center gap-3">
         {isSupported ? (
           <button
             onClick={handleMicClick}
@@ -144,6 +144,14 @@ export default function PlanPage() {
         >
           Send
         </button>
+      </div>
+
+      <div className="mb-8">
+        {micError && (
+          <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-400">
+            {micError}
+          </p>
+        )}
       </div>
 
       <div>
