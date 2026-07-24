@@ -37,6 +37,8 @@ export function useSpeechRecognition() {
   const [transcript, setTranscript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const finalTextRef = useRef("");
+  const onFinalResultRef = useRef<((text: string) => void) | null>(null);
 
   useEffect(() => {
     const w = window as unknown as {
@@ -59,9 +61,15 @@ export function useSpeechRecognition() {
     if (!Ctor) return;
 
     const recognition = new Ctor();
-    recognition.continuous = false;
+    // continuous=true so a natural pause between clauses ("write a report...
+    // and call the dentist") doesn't end the session early — we only finalize
+    // when the user explicitly taps the mic again (see stop()/onend below).
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = "en-US";
+
+    finalTextRef.current = "";
+    onFinalResultRef.current = onFinalResult;
 
     recognition.onresult = (event) => {
       let interim = "";
@@ -74,10 +82,14 @@ export function useSpeechRecognition() {
           interim += result.transcript;
         }
       }
-      setTranscript(final || interim);
-      if (final) onFinalResult(final.trim());
+      finalTextRef.current = final;
+      setTranscript(final + (interim ? ` ${interim}` : ""));
     };
-    recognition.onend = () => setListening(false);
+    recognition.onend = () => {
+      setListening(false);
+      const text = finalTextRef.current.trim();
+      if (text) onFinalResultRef.current?.(text);
+    };
     recognition.onerror = (event) => {
       setListening(false);
       const message = ERROR_MESSAGES[event.error] ?? `Speech recognition error: ${event.error}`;

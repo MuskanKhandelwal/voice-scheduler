@@ -39,12 +39,16 @@ const RESPONSE_SCHEMA = {
   additionalProperties: false,
 };
 
-function systemPrompt(profile: Record<string, string>, goalText: string) {
-  return `You are a concise voice scheduling assistant. The user tells you about tasks they need to do today; your job is to gather, for each task: a short title, an estimated duration in minutes, a priority (low/medium/high), and whether it needs high or low mental energy.
+function systemPrompt(profile: Record<string, string>, goalText: string, existingTaskTitles: string[]) {
+  return `You are a concise voice scheduling assistant. The user may describe several tasks in a single message (they were told to list everything at once, then pause). Your job is to gather, for EACH task they mention: a short title, a realistic estimated duration in minutes (never under 5), a priority (low/medium/high), and whether it needs high or low mental energy.
 
-Ask about ONE missing field at a time, in a short, natural, spoken-friendly sentence (this will be read aloud via text-to-speech, so avoid lists, bullet points, or markdown). Infer fields yourself when reasonably obvious instead of asking (e.g. "quick email" implies low energy, short duration) — only ask about genuinely ambiguous fields.
+Process every task the user mentioned, not just the first one. Ask about at most ONE missing field at a time, in a short, natural, spoken-friendly sentence (this will be read aloud via text-to-speech, so avoid lists, bullet points, or markdown, and ask about only one task's field per reply). Infer fields yourself when reasonably obvious instead of asking (e.g. "quick email" implies low energy, ~10 minutes) — only ask about genuinely ambiguous fields.
 
-Only include a task in ready_tasks once ALL of its fields are known. Never ask about more than one task at a time; finish one task's fields before starting the next. "reply" must never be empty: once every task the user mentioned is ready, put a brief spoken-friendly confirmation there (e.g. "Got it, that's on your calendar.") instead of a question.
+Only include a task in ready_tasks once ALL of its fields are known. "reply" must never be empty: once every task the user mentioned is ready, put a brief spoken-friendly confirmation there (e.g. "Got it, both are on your calendar.") instead of a question.
+
+These tasks are already on today's calendar — do not re-create them if the user mentions something that's clearly the same task; treat it as an update to the existing one instead: ${existingTaskTitles.length ? existingTaskTitles.join(", ") : "(none yet)"}.
+
+If the day is looking overloaded (many tasks piling into a short window, or a task's energy need doesn't match any open time in its preferred window), briefly mention that trade-off in your reply and suggest a concrete fix (e.g. moving something lower-priority to tomorrow) instead of silently cramming it in.
 
 User's working hours: ${profile.working_hours_start}-${profile.working_hours_end}. Peak energy window: ${profile.energy_high_start}-${profile.energy_high_end}. Low energy window: ${profile.energy_low_start}-${profile.energy_low_end}. Today's goal: ${goalText || "(not set)"}.`;
 }
@@ -61,7 +65,7 @@ export async function POST(req: Request) {
   // may run in a different timezone (e.g. UTC) than the user placing the call.
   const today: string = clientToday ?? format(new Date(), "yyyy-MM-dd");
   const todayDate = new Date(`${today}T00:00:00`);
-  const [{ data: profile }, { data: goal }, { data: history }] = await Promise.all([
+  const [{ data: profile }, { data: goal }, { data: history }, { data: existingTasks }] = await Promise.all([
     supabase.from("profile").select("*").eq("id", 1).single(),
     supabase.from("daily_goals").select("goal_text").eq("date", today).maybeSingle(),
     supabase
@@ -69,12 +73,14 @@ export async function POST(req: Request) {
       .select("role, content")
       .eq("session_id", sessionId)
       .order("created_at", { ascending: true }),
+    supabase.from("tasks").select("title").in("status", ["pending", "scheduled"]),
   ]);
 
   await supabase.from("conversation_messages").insert({ session_id: sessionId, role: "user", content: message });
 
+  const existingTaskTitles = (existingTasks ?? []).map((t: { title: string }) => t.title);
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    { role: "system", content: systemPrompt(profile ?? {}, goal?.goal_text ?? "") },
+    { role: "system", content: systemPrompt(profile ?? {}, goal?.goal_text ?? "", existingTaskTitles) },
     ...((history ?? []) as { role: "user" | "assistant"; content: string }[]),
     { role: "user", content: message },
   ];
@@ -99,7 +105,7 @@ export async function POST(req: Request) {
       .from("tasks")
       .insert({
         title: draft.title,
-        estimated_minutes: draft.estimated_minutes,
+        estimated_minutes: Math.max(5, draft.estimated_minutes),
         priority: draft.priority,
         energy_requirement: draft.energy_requirement,
         status: "pending",

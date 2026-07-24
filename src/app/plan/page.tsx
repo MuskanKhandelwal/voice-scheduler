@@ -10,8 +10,21 @@ interface ChatBubble {
   content: string;
 }
 
+// One conversation session per calendar day, persisted so a page reload
+// doesn't lose track of what's already been discussed/scheduled today
+// (which previously caused the same task to get re-created as a duplicate).
+function getSessionId(today: string): string {
+  if (typeof window === "undefined") return crypto.randomUUID();
+  const key = `cadence-session-${today}`;
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+  const fresh = crypto.randomUUID();
+  window.localStorage.setItem(key, fresh);
+  return fresh;
+}
+
 export default function PlanPage() {
-  const sessionId = useMemo(() => crypto.randomUUID(), []);
+  const sessionId = useMemo(() => getSessionId(localISODate()), []);
   const { isSupported, listening, transcript, error: micError, start, stop } = useSpeechRecognition();
   const [messages, setMessages] = useState<ChatBubble[]>([
     { role: "assistant", content: "Tell me what's on your plate today." },
@@ -109,6 +122,11 @@ export default function PlanPage() {
         <div ref={bottomRef} />
       </div>
 
+      {isSupported && (
+        <p className="mb-2 text-xs text-zinc-400">
+          {listening ? "Listening — pause as much as you need, tap the mic again when you're done." : "Tap the mic and list everything at once, then tap again to send."}
+        </p>
+      )}
       <div className="mb-3 flex items-center gap-3">
         {isSupported ? (
           <button
