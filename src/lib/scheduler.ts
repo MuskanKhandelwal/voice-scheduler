@@ -55,12 +55,12 @@ export function scheduleTasks(
   pendingTasks: Task[],
   profile: Profile,
   dateRange: string[], // dates to consider, in order, YYYY-MM-DD
-  existingEventsByDate: Record<string, CalendarEvent[]>
+  existingEventsByDate: Record<string, CalendarEvent[]>,
+  // Minutes-since-midnight floor for the FIRST date in dateRange (i.e. "now"
+  // when that date is today). Slots before this on that date are unavailable
+  // so we never schedule a task into a time that's already passed.
+  todayStartFloor = 0
 ): ScheduledPlacement[] {
-  const workingHours: TimeRange = {
-    start: toMinutes(profile.working_hours_start),
-    end: toMinutes(profile.working_hours_end),
-  };
   const energyHigh: TimeRange = {
     start: toMinutes(profile.energy_high_start),
     end: toMinutes(profile.energy_high_end),
@@ -72,13 +72,16 @@ export function scheduleTasks(
 
   // Working copy of free slots per date, mutated as we place tasks.
   const freeByDate: Record<string, TimeRange[]> = {};
-  for (const date of dateRange) {
+  dateRange.forEach((date, i) => {
+    // On the first date (today), don't offer any time earlier than "now".
+    const dayStart = i === 0 ? Math.max(toMinutes(profile.working_hours_start), todayStartFloor) : toMinutes(profile.working_hours_start);
+    const workingHours: TimeRange = { start: dayStart, end: toMinutes(profile.working_hours_end) };
     const busy = (existingEventsByDate[date] ?? []).map((e) => ({
       start: toMinutes(e.start_time),
       end: toMinutes(e.end_time),
     }));
-    freeByDate[date] = freeSlots(workingHours, busy);
-  }
+    freeByDate[date] = workingHours.end > workingHours.start ? freeSlots(workingHours, busy) : [];
+  });
 
   const sortedTasks = [...pendingTasks].sort(
     (a, b) => PRIORITY_WEIGHT[b.priority] - PRIORITY_WEIGHT[a.priority]
