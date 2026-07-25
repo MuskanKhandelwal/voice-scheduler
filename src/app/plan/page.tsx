@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSpeechRecognition, speak } from "@/lib/useSpeechRecognition";
 import { localISODate } from "@/lib/date";
-import { supabaseBrowser } from "@/lib/supabase";
 import type { CalendarEvent } from "@/lib/types";
 
 interface ChatBubble {
@@ -49,16 +48,12 @@ export default function PlanPage() {
   // Conversation history is persisted server-side per session; reload it so
   // navigating away to /calendar or /insights and back doesn't wipe the chat.
   useEffect(() => {
-    supabaseBrowser
-      .from("conversation_messages")
-      .select("role, content")
-      .eq("session_id", sessionId)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (data && data.length) {
-          setMessages(data as ChatBubble[]);
-        }
-      });
+    fetch(`/api/conversation?sessionId=${sessionId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: ChatBubble[]) => {
+        if (data && data.length) setMessages(data);
+      })
+      .catch(() => {});
   }, [sessionId]);
 
   useEffect(() => {

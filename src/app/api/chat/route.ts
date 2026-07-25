@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { addDays, format } from "date-fns";
 import { supabaseServer } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth";
 import { openai, CHAT_MODEL } from "@/lib/openai";
 import { scheduleTasks } from "@/lib/scheduler";
 import type { CalendarEvent, Task } from "@/lib/types";
@@ -147,6 +148,9 @@ function minToHHMM(mins: number): string {
 }
 
 export async function POST(req: Request) {
+  const { userId, error: authError } = await requireUser();
+  if (authError) return authError;
+
   const { sessionId, message, today: clientToday, nowMinutes: clientNowMinutes } = await req.json();
   if (!sessionId || !message) {
     return NextResponse.json({ error: "sessionId and message are required" }, { status: 400 });
@@ -173,24 +177,31 @@ export async function POST(req: Request) {
   const dedupeCutoff = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
   const dateRange = Array.from({ length: LOOKAHEAD_DAYS }, (_, i) => format(addDays(todayDate, i), "yyyy-MM-dd"));
   const [{ data: profile }, { data: goal }, { data: history }, { data: existingTasks }, { data: upcomingEvents }] = await Promise.all([
-    supabase.from("profile").select("*").eq("id", 1).single(),
-    supabase.from("daily_goals").select("goal_text").eq("date", today).maybeSingle(),
+    supabase.from("profile").select("*").eq("user_id", userId).single(),
+    supabase.from("daily_goals").select("goal_text").eq("user_id", userId).eq("date", today).maybeSingle(),
     supabase
       .from("conversation_messages")
       .select("role, content")
+      .eq("user_id", userId)
       .eq("session_id", sessionId)
       .order("created_at", { ascending: true }),
-    supabase.from("tasks").select("title").in("status", ["pending", "scheduled"]).gte("created_at", dedupeCutoff),
+    supabase
+      .from("tasks")
+      .select("title")
+      .eq("user_id", userId)
+      .in("status", ["pending", "scheduled"])
+      .gte("created_at", dedupeCutoff),
     supabase
       .from("calendar_events")
       .select("*")
+      .eq("user_id", userId)
       .gte("date", dateRange[0])
       .lte("date", dateRange[dateRange.length - 1])
       .order("date")
       .order("start_time"),
   ]);
 
-  await supabase.from("conversation_messages").insert({ session_id: sessionId, role: "user", content: message });
+  await supabase.from("conversation_messages").insert({ user_id: userId, session_id: sessionId, role: "user", content: message });
 
   const existingTaskTitles = (existingTasks ?? []).map((t: { title: string }) => t.title);
   const scheduledList = (upcomingEvents ?? [])
@@ -229,6 +240,7 @@ export async function POST(req: Request) {
   const { data: todaysManualBlocks } = await supabase
     .from("calendar_events")
     .select("start_time, end_time")
+    .eq("user_id", userId)
     .eq("date", today)
     .eq("is_manual", true)
     .is("task_id", null);
@@ -238,6 +250,7 @@ export async function POST(req: Request) {
   for (const block of parsed.busy_blocks) {
     if (alreadyBlocked(block.start_time, block.end_time)) continue;
     await supabase.from("calendar_events").insert({
+      user_id: userId,
       task_id: null,
       title: block.label || "Unavailable",
       date: today,
@@ -266,14 +279,18 @@ export async function POST(req: Request) {
     if (!best) continue;
 
     if (change.action === "delete") {
-      await supabase.from("calendar_events").delete().eq("id", best.id);
-      if (best.task_id) await supabase.from("tasks").update({ status: "pending" }).eq("id", best.task_id);
+      await supabase.from("calendar_events").delete().eq("id", best.id).eq("user_id", userId);
+      if (best.task_id) await supabase.from("tasks").update({ status: "pending" }).eq("id", best.task_id).eq("user_id", userId);
       changeLines.push(`removed ${best.title}`);
     } else if (change.action === "move" && change.new_start_time) {
       const durationMin = hhmmToMin(best.end_time.slice(0, 5)) - hhmmToMin(best.start_time.slice(0, 5));
       const newStart = change.new_start_time;
       const newEnd = change.new_end_time ?? minToHHMM(hhmmToMin(newStart) + durationMin);
-      await supabase.from("calendar_events").update({ start_time: newStart, end_time: newEnd, is_manual: true }).eq("id", best.id);
+      await supabase
+        .from("calendar_events")
+        .update({ start_time: newStart, end_time: newEnd, is_manual: true })
+        .eq("id", best.id)
+        .eq("user_id", userId);
       changeLines.push(`moved ${best.title} to ${formatClock(newStart)}–${formatClock(newEnd)}`);
     }
   }
@@ -297,6 +314,7 @@ export async function POST(req: Request) {
     const { data: task } = await supabase
       .from("tasks")
       .insert({
+        user_id: userId,
         title: draft.title,
         estimated_minutes: Math.max(5, draft.estimated_minutes),
         priority: draft.priority,
@@ -320,6 +338,7 @@ export async function POST(req: Request) {
     const { data: existingEvents } = await supabase
       .from("calendar_events")
       .select("*")
+      .eq("user_id", userId)
       .gte("date", dateRange[0])
       .lte("date", dateRange[dateRange.length - 1]);
 
@@ -332,6 +351,7 @@ export async function POST(req: Request) {
     const placedTaskIds = new Set<string>();
     for (const placement of placements) {
       const { error: insertError } = await supabase.from("calendar_events").insert({
+        user_id: userId,
         task_id: placement.task.id,
         title: placement.task.title,
         date: placement.date,
@@ -340,7 +360,7 @@ export async function POST(req: Request) {
         is_manual: false,
       });
       if (!insertError) {
-        await supabase.from("tasks").update({ status: "scheduled" }).eq("id", placement.task.id);
+        await supabase.from("tasks").update({ status: "scheduled" }).eq("id", placement.task.id).eq("user_id", userId);
         placedCount++;
         placedTaskIds.add(placement.task.id);
         const dayLabel = placement.date === today ? "" : ` on ${format(new Date(`${placement.date}T00:00:00`), "EEEE")}`;
@@ -367,7 +387,7 @@ export async function POST(req: Request) {
     finalReply += ` I couldn't find room for ${unscheduledTitles.join(", ")} in the next week — want me to free up some time or drop something else?`;
   }
 
-  await supabase.from("conversation_messages").insert({ session_id: sessionId, role: "assistant", content: finalReply });
+  await supabase.from("conversation_messages").insert({ user_id: userId, session_id: sessionId, role: "assistant", content: finalReply });
 
   return NextResponse.json({
     reply: finalReply,

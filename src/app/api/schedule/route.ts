@@ -1,25 +1,30 @@
 import { NextResponse } from "next/server";
 import { addDays, format } from "date-fns";
 import { supabaseServer } from "@/lib/supabase";
+import { requireUser } from "@/lib/auth";
 import { scheduleTasks } from "@/lib/scheduler";
 import type { CalendarEvent, Task } from "@/lib/types";
 
 const LOOKAHEAD_DAYS = 7;
 
 export async function POST(req: Request) {
+  const { userId, error: authError } = await requireUser();
+  if (authError) return authError;
+
   const { today: clientToday } = await req.json().catch(() => ({ today: undefined }));
   const supabase = supabaseServer();
 
   const { data: profile, error: profileError } = await supabase
     .from("profile")
     .select("*")
-    .eq("id", 1)
+    .eq("user_id", userId)
     .single();
   if (profileError) return NextResponse.json({ error: profileError.message }, { status: 500 });
 
   const { data: pendingTasks, error: tasksError } = await supabase
     .from("tasks")
     .select("*")
+    .eq("user_id", userId)
     .eq("status", "pending");
   if (tasksError) return NextResponse.json({ error: tasksError.message }, { status: 500 });
   if (!pendingTasks?.length) return NextResponse.json({ placed: [] });
@@ -30,6 +35,7 @@ export async function POST(req: Request) {
   const { data: existingEvents, error: eventsError } = await supabase
     .from("calendar_events")
     .select("*")
+    .eq("user_id", userId)
     .gte("date", dateRange[0])
     .lte("date", dateRange[dateRange.length - 1]);
   if (eventsError) return NextResponse.json({ error: eventsError.message }, { status: 500 });
@@ -46,6 +52,7 @@ export async function POST(req: Request) {
     const { data: event, error: insertError } = await supabase
       .from("calendar_events")
       .insert({
+        user_id: userId,
         task_id: placement.task.id,
         title: placement.task.title,
         date: placement.date,
@@ -56,7 +63,7 @@ export async function POST(req: Request) {
       .select()
       .single();
     if (insertError) continue;
-    await supabase.from("tasks").update({ status: "scheduled" }).eq("id", placement.task.id);
+    await supabase.from("tasks").update({ status: "scheduled" }).eq("id", placement.task.id).eq("user_id", userId);
     inserted.push(event);
   }
 

@@ -1,4 +1,4 @@
-import Link from "next/link";
+import LandingCta from "@/components/LandingCta";
 
 const FEATURES = [
   {
@@ -37,20 +37,7 @@ export default function Home() {
           Speak your tasks, answer a couple of quick follow-ups, and watch them land on your calendar at the right
           time — matched to your working hours and your energy, not just whatever slot is free.
         </p>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          <Link
-            href="/plan"
-            className="rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-medium text-white shadow-sm transition hover:brightness-110"
-          >
-            Start planning your day
-          </Link>
-          <Link
-            href="/settings"
-            className="rounded-full border border-zinc-300 px-6 py-3 text-sm font-medium text-zinc-700 transition hover:border-zinc-400 dark:border-zinc-700 dark:text-zinc-300"
-          >
-            Set up working hours
-          </Link>
-        </div>
+        <LandingCta />
       </section>
 
       <section className="mx-auto w-full max-w-4xl px-6 pb-24">
