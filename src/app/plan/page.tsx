@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSpeechRecognition, speak } from "@/lib/useSpeechRecognition";
+import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
 import { localISODate } from "@/lib/date";
 import type { CalendarEvent } from "@/lib/types";
 
@@ -77,10 +77,9 @@ export default function PlanPage() {
         }),
       });
       const data = await res.json();
-      const reply = data.reply || (data.tasksScheduled > 0 ? "Done — that's on your calendar." : "Got it.");
+      const reply = data.reply || "Got it.";
       setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-      speak(reply);
-      if (data.tasksScheduled > 0 || data.eventsChanged > 0) refreshToday();
+      if (data.calendarChanged) refreshToday();
     } catch {
       setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, something went wrong reaching the server." }]);
     } finally {

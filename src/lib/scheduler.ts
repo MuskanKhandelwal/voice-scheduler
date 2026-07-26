@@ -1,16 +1,16 @@
 import type { CalendarEvent, Profile, Task } from "./types";
 
-interface TimeRange {
+export interface TimeRange {
   start: number; // minutes since midnight
   end: number;
 }
 
-function toMinutes(hhmm: string): number {
+export function toMinutes(hhmm: string): number {
   const [h, m] = hhmm.split(":").map(Number);
   return h * 60 + m;
 }
 
-function toHHMM(minutes: number): string {
+export function toHHMM(minutes: number): string {
   const h = Math.floor(minutes / 60)
     .toString()
     .padStart(2, "0");
@@ -19,7 +19,7 @@ function toHHMM(minutes: number): string {
 }
 
 /** Subtract busy ranges from a working-hours range, returning sorted free ranges. */
-function freeSlots(workingHours: TimeRange, busy: TimeRange[]): TimeRange[] {
+export function freeSlots(workingHours: TimeRange, busy: TimeRange[]): TimeRange[] {
   const sorted = [...busy].sort((a, b) => a.start - b.start);
   const free: TimeRange[] = [];
   let cursor = workingHours.start;
