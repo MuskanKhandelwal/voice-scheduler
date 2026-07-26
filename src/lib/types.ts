@@ -25,7 +25,7 @@ export interface CalendarEvent {
 }
 
 export interface Profile {
-  id: number;
+  user_id: string;
   working_hours_start: string;
   working_hours_end: string;
   energy_high_start: string;

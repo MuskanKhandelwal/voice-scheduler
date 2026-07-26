@@ -32,8 +32,8 @@ export default function SettingsPage() {
     if (!profile) return;
     setSaving(true);
     setSaved(false);
-    const { id, updated_at, ...rest } = profile;
-    void id;
+    const { user_id, updated_at, ...rest } = profile;
+    void user_id;
     void updated_at;
     await fetch("/api/profile", {
       method: "PATCH",

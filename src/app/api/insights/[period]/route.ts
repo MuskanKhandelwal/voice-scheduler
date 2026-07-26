@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { format, subDays } from "date-fns";
 import { supabaseServer } from "@/lib/supabase";
 import { requireUser } from "@/lib/auth";
+import { ensureProfile } from "@/lib/profile";
 import { computeStats } from "@/lib/insightStats";
 import { openai, CHAT_MODEL } from "@/lib/openai";
 import type { CalendarEvent, InsightPeriod, Profile } from "@/lib/types";
@@ -39,13 +40,11 @@ export async function GET(_req: Request, context: { params: Promise<{ period: st
   const periodEnd = format(today, "yyyy-MM-dd");
 
   const supabase = supabaseServer();
-  const [{ data: profile }, { data: events }, { data: goal }] = await Promise.all([
-    supabase.from("profile").select("*").eq("user_id", userId).maybeSingle(),
+  const [profile, { data: events }, { data: goal }] = await Promise.all([
+    ensureProfile(supabase, userId),
     supabase.from("calendar_events").select("*").eq("user_id", userId).gte("date", periodStart).lte("date", periodEnd),
     supabase.from("daily_goals").select("goal_text").eq("user_id", userId).eq("date", periodEnd).maybeSingle(),
   ]);
-
-  if (!profile) return NextResponse.json({ error: "profile not found" }, { status: 500 });
 
   const stats = computeStats((events ?? []) as CalendarEvent[], profile as Profile, days);
   const narrative = await narrativeFor(p, stats, goal?.goal_text ?? "");

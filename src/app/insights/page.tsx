@@ -18,16 +18,29 @@ export default function InsightsPage() {
   const [period, setPeriod] = useState<Period>("daily");
   const [loadedPeriod, setLoadedPeriod] = useState<Period | null>(null);
   const [data, setData] = useState<InsightResponse | null>(null);
-  const loading = loadedPeriod !== period;
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const loading = loadedPeriod !== period && !errorMsg;
 
   useEffect(() => {
     let cancelled = false;
+    // Clear any prior period's error before re-fetching.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setErrorMsg(null);
     fetch(`/api/insights/${period}`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Request failed (${r.status})`);
+        return r.json();
+      })
       .then((json) => {
         if (cancelled) return;
+        // Guard against a malformed payload so the page can't crash on render.
+        if (!json || !json.stats) throw new Error("Insights data was incomplete.");
         setData(json);
         setLoadedPeriod(period);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setErrorMsg(e.message || "Couldn't load insights.");
       });
     return () => {
       cancelled = true;
@@ -65,7 +78,13 @@ export default function InsightsPage() {
 
       {loading && <p className="text-sm text-zinc-500">Loading…</p>}
 
-      {data && !loading && (
+      {errorMsg && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-400">
+          {errorMsg}
+        </div>
+      )}
+
+      {data && !loading && !errorMsg && (
         <>
           <p className="mb-4 text-xs text-zinc-500">
             {data.periodStart} – {data.periodEnd} · {data.stats.totalEvents} events, {data.stats.completedEvents} completed
